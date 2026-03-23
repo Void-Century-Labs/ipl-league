@@ -1,65 +1,104 @@
-import Image from "next/image";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
-export default function Home() {
+interface OwnerStanding {
+  owner_id: number;
+  name: string;
+  total_points: number;
+  rank: number;
+}
+
+async function getLeaderboard(): Promise<OwnerStanding[]> {
+  const { data, error } = await supabase
+    .from("owner_standings")
+    .select("*")
+    .order("rank", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch leaderboard:", error);
+    return [];
+  }
+  return data ?? [];
+}
+
+function getRankStyle(rank: number): string {
+  switch (rank) {
+    case 1:
+      return "bg-yellow-50 border-yellow-300 dark:bg-yellow-950/30 dark:border-yellow-700";
+    case 2:
+      return "bg-gray-50 border-gray-300 dark:bg-gray-800/50 dark:border-gray-600";
+    case 3:
+      return "bg-orange-50 border-orange-300 dark:bg-orange-950/30 dark:border-orange-700";
+    default:
+      return "bg-white border-gray-200 dark:bg-gray-900 dark:border-gray-800";
+  }
+}
+
+function getRankBadge(rank: number): string {
+  switch (rank) {
+    case 1:
+      return "bg-yellow-400 text-yellow-900";
+    case 2:
+      return "bg-gray-300 text-gray-800";
+    case 3:
+      return "bg-orange-400 text-orange-900";
+    default:
+      return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
+  }
+}
+
+export const revalidate = 60; // revalidate every 60 seconds
+
+export default async function Home() {
+  const standings = await getLeaderboard();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold tracking-tight">Leaderboard</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          IPL 2026 Fantasy League Standings
+        </p>
+      </div>
+
+      {standings.length === 0 ? (
+        <div className="text-center py-16 text-gray-500 dark:text-gray-400">
+          <p className="text-lg font-medium">No data yet</p>
+          <p className="text-sm mt-1">
+            Points will appear once IPL 2026 matches begin and scores are
+            synced.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      ) : (
+        <div className="space-y-3">
+          {standings.map((owner) => (
+            <Link
+              key={owner.owner_id}
+              href={`/team/${encodeURIComponent(owner.name)}`}
+              className={`block border rounded-lg p-4 transition-shadow hover:shadow-md ${getRankStyle(owner.rank)}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${getRankBadge(owner.rank)}`}
+                  >
+                    {owner.rank}
+                  </span>
+                  <span className="text-lg font-semibold">{owner.name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-bold tabular-nums">
+                    {owner.total_points.toLocaleString()}
+                  </span>
+                  <span className="text-sm text-gray-500 dark:text-gray-400 ml-1">
+                    pts
+                  </span>
+                </div>
+              </div>
+            </Link>
+          ))}
         </div>
-      </main>
+      )}
     </div>
   );
 }
