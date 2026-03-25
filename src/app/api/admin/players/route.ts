@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
+import { searchPlayer } from "@/lib/cricapi";
 
 function checkAuth(request: Request): boolean {
   return request.headers.get("x-admin-password") === process.env.ADMIN_PASSWORD;
@@ -47,6 +48,23 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // Auto-populate cricapi_player_id if not provided
+    if (!body.cricapi_player_id) {
+      const results = await searchPlayer(body.name);
+      const best = results.find(
+        (r) => r.name.toLowerCase() === body.name.toLowerCase()
+      ) ?? results[0];
+
+      if (best) {
+        await supabaseAdmin
+          .from("players")
+          .update({ cricapi_player_id: best.id })
+          .eq("id", data.id);
+        data.cricapi_player_id = best.id;
+      }
+    }
+
     return NextResponse.json(data, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
