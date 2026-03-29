@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode for manual toggle */
+@variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f9fafb;
   --foreground: #111827;
@@ -12,11 +15,9 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #030712;
-    --foreground: #f3f4f6;
-  }
+.dark {
+  --background: #030712;
+  --foreground: #f3f4f6;
 }
 
 body {

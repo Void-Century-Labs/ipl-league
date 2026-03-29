@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import ThemeToggle from "@/components/ThemeToggle";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,7 +36,7 @@ export default function RootLayout({
               <Link href="/" className="text-lg font-bold tracking-tight">
                 IPL 2026 Fantasy
               </Link>
-              <nav className="flex gap-6 text-sm font-medium">
+              <nav className="flex items-center gap-6 text-sm font-medium">
                 <Link
                   href="/"
                   className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
@@ -54,6 +55,7 @@ export default function RootLayout({
                 >
                   Admin
                 </Link>
+                <ThemeToggle />
               </nav>
             </div>
           </div>
