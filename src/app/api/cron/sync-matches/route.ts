@@ -98,12 +98,20 @@ async function syncMatches() {
           scorecard.scorecard,
           player.cricapi_player_id
         );
-        if (!stats) continue;
+
+        if (!stats) {
+          console.log(`[sync] SKIP ${player.name} (${player.cricapi_player_id}) — not found in scorecard`);
+          continue;
+        }
 
         const points = calculatePoints(stats, {
           isCaptain: player.is_captain,
           isViceCaptain: player.is_vice_captain,
         });
+
+        console.log(
+          `[sync] ${player.name} | runs=${stats.runs} wkts=${stats.wickets} 6s=${stats.sixes} catches=${stats.catches} | raw=${points.rawTotal} final=${points.finalTotal}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}`
+        );
 
         const { error: scoreError } = await supabaseAdmin
           .from("player_match_scores")
@@ -125,7 +133,11 @@ async function syncMatches() {
             { onConflict: "player_id,match_id" }
           );
 
-        if (!scoreError) playerScoresAdded++;
+        if (scoreError) {
+          console.error(`[sync] DB error for ${player.name}:`, scoreError.message);
+        } else {
+          playerScoresAdded++;
+        }
       }
     }
 
