@@ -73,7 +73,6 @@ export default async function TeamPage({
       ),
     0
   );
-  const totalPurse = players.reduce((sum, p) => sum + p.purse_spent, 0);
 
   return (
     <div>
@@ -95,19 +94,6 @@ export default async function TeamPage({
               {totalPoints.toLocaleString()}
             </strong>
           </span>
-          <span>
-            Purse Used:{" "}
-            <strong className="text-gray-900 dark:text-gray-100">
-              {totalPurse.toLocaleString()}
-            </strong>{" "}
-            / 20,000
-          </span>
-          <span>
-            Purse Remaining:{" "}
-            <strong className="text-gray-900 dark:text-gray-100">
-              {(20000 - totalPurse).toLocaleString()}
-            </strong>
-          </span>
         </div>
       </div>
 
@@ -117,10 +103,8 @@ export default async function TeamPage({
             <tr className="bg-gray-50 dark:bg-gray-800/50 text-left text-gray-500 dark:text-gray-400">
               <th className="px-4 py-3 font-medium">#</th>
               <th className="px-4 py-3 font-medium">Player</th>
-              <th className="px-4 py-3 font-medium">IPL Team</th>
-              <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium text-right">Purse</th>
-              <th className="px-4 py-3 font-medium text-right">Matches</th>
+              <th className="hidden sm:table-cell px-4 py-3 font-medium">IPL Team</th>
+              <th className="hidden sm:table-cell px-4 py-3 font-medium text-right">Matches</th>
               <th className="px-4 py-3 font-medium text-right">Points</th>
             </tr>
           </thead>
@@ -139,28 +123,35 @@ export default async function TeamPage({
                   className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                 >
                   <td className="px-4 py-3 text-gray-400">{idx + 1}</td>
-                  <td className="px-4 py-3 font-medium">{player.name}</td>
                   <td className="px-4 py-3">
-                    <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                      {player.ipl_team?.toUpperCase() ?? "—"}
+                    <span
+                      className={
+                        player.is_captain
+                          ? "font-extrabold text-base"
+                          : player.is_vice_captain
+                          ? "font-bold"
+                          : "font-medium"
+                      }
+                    >
+                      {player.name}
                     </span>
-                  </td>
-                  <td className="px-4 py-3">
                     {player.is_captain && (
-                      <span className="inline-block px-2 py-0.5 text-xs font-bold rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                      <span className="ml-2 inline-block px-1.5 py-0.5 text-xs font-bold rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                         C
                       </span>
                     )}
                     {player.is_vice_captain && (
-                      <span className="inline-block px-2 py-0.5 text-xs font-bold rounded bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                      <span className="ml-2 inline-block px-1.5 py-0.5 text-xs font-bold rounded bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
                         VC
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {player.purse_spent.toLocaleString()}
+                  <td className="hidden sm:table-cell px-4 py-3">
+                    <span className="inline-block px-2 py-0.5 text-xs font-medium rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      {player.ipl_team?.toUpperCase() ?? "—"}
+                    </span>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
+                  <td className="hidden sm:table-cell px-4 py-3 text-right tabular-nums">
                     {matchCount}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold tabular-nums">
