@@ -29,8 +29,12 @@ async function syncMatches() {
     summary.push(`Using series ID: ${seriesId}`);
 
     const seriesInfo = await getSeriesInfo(seriesId);
-    const iplMatches = seriesInfo?.matchList ?? [];
 
+    if (!seriesInfo) {
+      return NextResponse.json({ status: "error", message: "series_info API call failed — null response", summary });
+    }
+
+    const iplMatches = seriesInfo.matchList ?? [];
     summary.push(`Found ${iplMatches.length} matches in series`);
 
     // 2. Get already-synced match IDs
@@ -200,6 +204,6 @@ function extractPlayerStats(
     isCentury: totalRuns >= 100,
     isFiveWicket: totalWickets >= 5,
     isHatTrick: false, // CricAPI doesn't directly provide hat-trick info; needs manual check
-    isSixSixes: totalSixes >= 6,
+    isSixSixes: false, // requires ball-by-ball data — scorecard only has match totals
   };
 }
