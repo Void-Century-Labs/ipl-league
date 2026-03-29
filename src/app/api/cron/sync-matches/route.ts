@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
-import { getCurrentMatches, getMatchScorecard } from "@/lib/cricapi";
+import { getSeriesInfo, getMatchScorecard } from "@/lib/cricapi";
 import { calculatePoints } from "@/lib/points";
 import type { ScorecardBatsman, ScorecardBowler } from "@/lib/cricapi";
 
@@ -20,15 +20,18 @@ async function syncMatches() {
   const summary: string[] = [];
 
   try {
-    // 1. Fetch current matches from CricAPI
-    const matches = await getCurrentMatches();
-    const iplMatches = matches.filter(
-      (m) =>
-        m.name.toLowerCase().includes("ipl") ||
-        m.name.toLowerCase().includes("indian premier league")
-    );
+    // 1. Get all matches in the IPL series
+    const seriesId = process.env.IPL_SERIES_ID;
+    if (!seriesId) {
+      return NextResponse.json({ status: "error", message: "IPL_SERIES_ID env var not set" });
+    }
 
-    summary.push(`Found ${iplMatches.length} IPL matches from API`);
+    summary.push(`Using series ID: ${seriesId}`);
+
+    const seriesInfo = await getSeriesInfo(seriesId);
+    const iplMatches = seriesInfo?.matchList ?? [];
+
+    summary.push(`Found ${iplMatches.length} matches in series`);
 
     // 2. Get already-synced match IDs
     const { data: existingMatches } = await supabaseAdmin

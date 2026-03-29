@@ -106,6 +106,34 @@ async function fetchAPI<T>(
   }
 }
 
+export interface CricAPISeries {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  odi: number;
+  t20: number;
+  test: number;
+  squads: number;
+  matches: number;
+}
+
+export interface CricAPISeriesInfo {
+  info: CricAPISeries;
+  matchList: CricAPIMatch[];
+}
+
+export async function listSeries(search: string): Promise<CricAPISeries[]> {
+  const data = await fetchAPI<CricAPISeries[]>("series", { search });
+  return data ?? [];
+}
+
+export async function getSeriesInfo(
+  seriesId: string
+): Promise<CricAPISeriesInfo | null> {
+  return fetchAPI<CricAPISeriesInfo>("series_info", { id: seriesId });
+}
+
 export async function getCurrentMatches(): Promise<CricAPIMatch[]> {
   const data = await fetchAPI<CricAPIMatch[]>("currentMatches");
   return data ?? [];
