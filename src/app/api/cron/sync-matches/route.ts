@@ -20,22 +20,42 @@ async function syncMatches() {
   const summary: string[] = [];
 
   try {
-    // 1. Get all matches in the IPL series
-    const seriesId = process.env.IPL_SERIES_ID;
-    if (!seriesId) {
-      return NextResponse.json({ status: "error", message: "IPL_SERIES_ID env var not set" });
+    // 1. Get all active seasons (replaces single IPL_SERIES_ID env var)
+    const { data: activeSeasons } = await supabaseAdmin
+      .from("seasons")
+      .select("id, name, cricapi_series_id")
+      .eq("is_active", true);
+
+    // Fallback: use IPL_SERIES_ID env var if no active seasons in DB
+    const seasons = activeSeasons?.length
+      ? activeSeasons
+      : process.env.IPL_SERIES_ID
+      ? [{ id: null, name: "IPL (env)", cricapi_series_id: process.env.IPL_SERIES_ID }]
+      : [];
+
+    if (seasons.length === 0) {
+      return NextResponse.json({
+        status: "error",
+        message: "No active seasons found and IPL_SERIES_ID env var not set",
+      });
     }
 
-    summary.push(`Using series ID: ${seriesId}`);
+    for (const season of seasons) {
+      if (!season.cricapi_series_id) {
+        summary.push(`Skipping season "${season.name}" — no cricapi_series_id`);
+        continue;
+      }
 
-    const seriesInfo = await getSeriesInfo(seriesId);
+      summary.push(`Processing season: ${season.name} (series: ${season.cricapi_series_id})`);
 
-    if (!seriesInfo) {
-      return NextResponse.json({ status: "error", message: "series_info API call failed — null response", summary });
-    }
+      const seriesInfo = await getSeriesInfo(season.cricapi_series_id);
+      if (!seriesInfo) {
+        summary.push(`  series_info API call failed for ${season.name}`);
+        continue;
+      }
 
-    const iplMatches = seriesInfo.matchList ?? [];
-    summary.push(`Found ${iplMatches.length} matches in series`);
+      const iplMatches = seriesInfo.matchList ?? [];
+      summary.push(`  Found ${iplMatches.length} matches in series`);
 
     // 2. Get already-synced matches. We dedup by BOTH cricapi_match_id and
     // name, because CricAPI sometimes re-issues a new id for the same physical
@@ -51,20 +71,33 @@ async function syncMatches() {
       (existingMatches ?? []).map((m) => m.name).filter(Boolean)
     );
 
-    // 3. Get our league players for matching
-    const { data: leaguePlayers } = await supabaseAdmin
-      .from("players")
-      .select("id, name, cricapi_player_id, is_captain, is_vice_captain");
+      // 3. Get all league players across all leagues for this season
+      const playerQuery = supabaseAdmin
+        .from("players")
+        .select("id, name, cricapi_player_id, is_captain, is_vice_captain, league_id, league_member_id");
 
-    if (!leaguePlayers) {
-      return NextResponse.json({
-        status: "error",
-        message: "Failed to fetch league players",
-      });
-    }
+      // If season has an ID in DB, scope to leagues in that season
+      if (season.id) {
+        const { data: leaguesInSeason } = await supabaseAdmin
+          .from("leagues")
+          .select("id")
+          .eq("season_id", season.id);
 
-    let matchesSynced = 0;
-    let playerScoresAdded = 0;
+        const leagueIds = (leaguesInSeason ?? []).map((l) => l.id);
+        if (leagueIds.length > 0) {
+          playerQuery.in("league_id", leagueIds);
+        }
+      }
+
+      const { data: leaguePlayers } = await playerQuery;
+
+      if (!leaguePlayers || leaguePlayers.length === 0) {
+        summary.push(`  No league players found for season ${season.name}`);
+        continue;
+      }
+
+      let matchesSynced = 0;
+      let playerScoresAdded = 0;
 
     for (const match of iplMatches) {
       // Skip already synced and non-completed matches.
@@ -99,14 +132,14 @@ async function syncMatches() {
           continue;
         }
 
-        const points = calculatePoints(stats, {
-          isCaptain: player.is_captain,
-          isViceCaptain: player.is_vice_captain,
-        });
+          const points = calculatePoints(stats, {
+            isCaptain: player.is_captain,
+            isViceCaptain: player.is_vice_captain,
+          });
 
-        console.log(
-          `[sync] ${player.name} | runs=${stats.runs} wkts=${stats.wickets} 6s=${stats.sixes} catches=${stats.catches} | raw=${points.rawTotal} final=${points.finalTotal}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}`
-        );
+          console.log(
+            `[sync] ${player.name} | runs=${stats.runs} wkts=${stats.wickets} 6s=${stats.sixes} | raw=${points.rawTotal} final=${points.finalTotal}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}`
+          );
 
         scoreRows.push({
           player_id: player.id,
@@ -171,9 +204,10 @@ async function syncMatches() {
       playerScoresAdded += scoreRows.length;
     }
 
-    summary.push(
-      `Synced ${matchesSynced} new matches, added ${playerScoresAdded} player scores`
-    );
+      summary.push(
+        `  Synced ${matchesSynced} new matches, added ${playerScoresAdded} player scores`
+      );
+    }
 
     return NextResponse.json({
       status: "success",
@@ -218,7 +252,6 @@ function extractPlayerStats(
   let found = false;
 
   for (const innings of scorecardInnings) {
-    // Check batting
     for (const bat of innings.batting) {
       if (bat.batsman.id === cricapiPlayerId) {
         totalRuns += bat.r;
@@ -227,7 +260,6 @@ function extractPlayerStats(
       }
     }
 
-    // Check bowling
     for (const bowl of innings.bowling) {
       if (bowl.bowler.id === cricapiPlayerId) {
         totalWickets += bowl.w;
@@ -245,7 +277,7 @@ function extractPlayerStats(
     sixes: totalSixes,
     isCentury: totalRuns >= 100,
     isFiveWicket: totalWickets >= 5,
-    isHatTrick: false, // CricAPI doesn't directly provide hat-trick info; needs manual check
-    isSixSixes: false, // requires ball-by-ball data — scorecard only has match totals
+    isHatTrick: false,
+    isSixSixes: false,
   };
 }

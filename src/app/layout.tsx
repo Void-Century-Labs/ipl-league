@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
+import UserMenu from "@/components/UserMenu";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "IPL 2026 Fantasy League",
-  description: "Track your IPL 2026 fantasy league points and standings",
+  title: "IPL Fantasy League",
+  description: "Create and manage your IPL fantasy leagues",
 };
 
 export default function RootLayout({
@@ -34,26 +35,14 @@ export default function RootLayout({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-14">
               <Link href="/" className="text-lg font-bold tracking-tight">
-                IPL 2026 Fantasy
+                IPL Fantasy
               </Link>
-              <nav className="flex items-center gap-6 text-sm font-medium">
+              <nav className="flex items-center gap-4 text-sm font-medium">
                 <Link
                   href="/"
                   className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
                 >
-                  Leaderboard
-                </Link>
-                <Link
-                  href="/players"
-                  className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
-                >
-                  Players
-                </Link>
-                <Link
-                  href="/matches"
-                  className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
-                >
-                  Matches
+                  Home
                 </Link>
                 <Link
                   href="/admin"
@@ -62,6 +51,7 @@ export default function RootLayout({
                   Admin
                 </Link>
                 <ThemeToggle />
+                <UserMenu />
               </nav>
             </div>
           </div>

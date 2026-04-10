@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createClient } from "@/lib/supabase-browser";
 
 interface PlayerWithOwner {
   id: number;
@@ -34,14 +35,18 @@ export default function AdminPage() {
   const [newPurse, setNewPurse] = useState("");
   const [newCricapiId, setNewCricapiId] = useState("");
 
+  const [authMode, setAuthMode] = useState<"supabase" | "password" | null>(null);
+
   const getStoredPassword = () => sessionStorage.getItem("admin_password") ?? "";
 
   const headers = useCallback(
     () => ({
       "Content-Type": "application/json",
-      "x-admin-password": getStoredPassword(),
+      ...(authMode === "password"
+        ? { "x-admin-password": getStoredPassword() }
+        : {}),
     }),
-    []
+    [authMode]
   );
 
   const fetchPlayers = useCallback(async () => {
@@ -62,11 +67,21 @@ export default function AdminPage() {
   }, [headers, newOwnerId]);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("admin_password");
-    if (stored) {
-      setAuthenticated(true);
-      setPassword(stored);
-    }
+    // Check Supabase auth first, fallback to stored password
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setAuthenticated(true);
+        setAuthMode("supabase");
+      } else {
+        const stored = sessionStorage.getItem("admin_password");
+        if (stored) {
+          setAuthenticated(true);
+          setAuthMode("password");
+          setPassword(stored);
+        }
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -83,6 +98,7 @@ export default function AdminPage() {
     });
     if (res.ok) {
       sessionStorage.setItem("admin_password", password);
+      setAuthMode("password");
       setAuthenticated(true);
     } else {
       setAuthError("Invalid password");

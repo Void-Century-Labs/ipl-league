@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
 import { searchPlayer } from "@/lib/cricapi";
+import { createClient } from "@/lib/supabase-ssr";
 
-function checkAuth(request: Request): boolean {
-  return request.headers.get("x-admin-password") === process.env.ADMIN_PASSWORD;
+async function checkAuth(request: Request): Promise<boolean> {
+  // Legacy password auth (kept for backward compatibility during transition)
+  if (request.headers.get("x-admin-password") === process.env.ADMIN_PASSWORD) {
+    return true;
+  }
+
+  // Supabase session auth
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  return !!user;
 }
 
 export async function GET(request: Request) {
-  if (!checkAuth(request)) {
+  if (!(await checkAuth(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -25,7 +34,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!checkAuth(request)) {
+  if (!(await checkAuth(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -72,7 +81,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!checkAuth(request)) {
+  if (!(await checkAuth(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -139,7 +148,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!checkAuth(request)) {
+  if (!(await checkAuth(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -15,7 +15,7 @@ export interface PlayerStat {
   mvp_score: number; // 0–100 percentile (higher = better value per rupee)
 }
 
-export async function getAllPlayerStats(): Promise<PlayerStat[]> {
+export async function getAllPlayerStats(leagueId: string): Promise<PlayerStat[]> {
   const { data, error } = await supabase.from("players").select(`
       id, name, ipl_team, purse_spent, is_captain, is_vice_captain,
       owners!inner ( name ),
@@ -35,7 +35,7 @@ export async function getAllPlayerStats(): Promise<PlayerStat[]> {
       purse_spent: p.purse_spent,
       is_captain: p.is_captain,
       is_vice_captain: p.is_vice_captain,
-      owner_name: (p.owners as unknown as { name: string }).name,
+      owner_name: (p.league_members as unknown as { display_name: string }).display_name,
       total_runs: scores.reduce((s, ms) => s + ms.runs, 0),
       total_wickets: scores.reduce((s, ms) => s + ms.wickets, 0),
       total_points: scores.reduce((s, ms) => s + ms.raw_points, 0),

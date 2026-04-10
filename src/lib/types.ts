@@ -3,6 +3,39 @@ export interface Owner {
   name: string;
 }
 
+export interface Season {
+  id: number;
+  name: string;
+  cricapi_series_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
+}
+
+export interface League {
+  id: string;
+  name: string;
+  slug: string;
+  season_id: number | null;
+  created_by: string | null;
+  invite_code: string;
+  max_owners: number;
+  purse_budget: number;
+  scoring_config: Record<string, unknown>;
+  draft_status: string;
+  created_at: string;
+  season?: Season;
+}
+
+export interface LeagueMember {
+  id: number;
+  league_id: string;
+  user_id: string | null;
+  display_name: string;
+  role: string;
+  joined_at: string;
+}
+
 export interface Player {
   id: number;
   name: string;
@@ -12,6 +45,8 @@ export interface Player {
   is_captain: boolean;
   is_vice_captain: boolean;
   cricapi_player_id: string | null;
+  league_id: string | null;
+  league_member_id: number | null;
 }
 
 export interface Match {
@@ -24,6 +59,7 @@ export interface Match {
   venue: string | null;
   result: string | null;
   synced_at: string;
+  season_id: number | null;
 }
 
 export interface PlayerMatchScore {
@@ -43,8 +79,10 @@ export interface PlayerMatchScore {
 }
 
 export interface OwnerStanding {
-  owner_id: number;
+  member_id: number;
   name: string;
+  league_id: string;
+  user_id: string | null;
   total_points: number;
   rank: number;
 }
