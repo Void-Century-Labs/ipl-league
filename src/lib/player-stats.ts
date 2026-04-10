@@ -19,14 +19,14 @@ export async function getAllPlayerStats(): Promise<PlayerStat[]> {
   const { data, error } = await supabase.from("players").select(`
       id, name, ipl_team, purse_spent, is_captain, is_vice_captain,
       owners!inner ( name ),
-      player_match_scores ( runs, wickets, final_points )
+      player_match_scores ( runs, wickets, raw_points )
     `);
 
   if (error || !data) return [];
 
   const stats: PlayerStat[] = data.map((p) => {
     const scores = (
-      p.player_match_scores as { runs: number; wickets: number; final_points: number }[]
+      p.player_match_scores as { runs: number; wickets: number; raw_points: number }[]
     ) ?? [];
     return {
       id: p.id,
@@ -38,7 +38,7 @@ export async function getAllPlayerStats(): Promise<PlayerStat[]> {
       owner_name: (p.owners as unknown as { name: string }).name,
       total_runs: scores.reduce((s, ms) => s + ms.runs, 0),
       total_wickets: scores.reduce((s, ms) => s + ms.wickets, 0),
-      total_points: scores.reduce((s, ms) => s + ms.final_points, 0),
+      total_points: scores.reduce((s, ms) => s + ms.raw_points, 0),
       matches_played: scores.length,
       mvp_score: 0,
     };

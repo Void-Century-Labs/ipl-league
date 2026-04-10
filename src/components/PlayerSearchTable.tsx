@@ -37,7 +37,7 @@ export default function PlayerSearchTable({ players }: { players: PlayerStat[] }
           <span className="text-right">Price</span>
           <span className="text-right">Runs</span>
           <span className="text-right">Wkts</span>
-          <span className="text-right">Total Pts</span>
+          <span className="text-right">Base Pts</span>
           <span className="text-right">MVP</span>
         </div>
 
