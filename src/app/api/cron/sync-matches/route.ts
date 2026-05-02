@@ -190,12 +190,19 @@ async function syncMatches() {
 
 // Retry the scorecard fetch a few times before giving up. CricAPI is
 // occasionally flaky right after a match ends — a transient null shouldn't
-// cause us to skip the match permanently.
+// cause us to skip the match permanently. Skip retries on permanent
+// failures (e.g. "not found", rate limit) to avoid burning the daily quota.
 async function fetchScorecardWithRetry(matchId: string, attempts = 3) {
   const delays = [1000, 2000, 4000]; // 1s, 2s, 4s
   for (let i = 0; i < attempts; i++) {
     const result = await getMatchScorecard(matchId);
-    if (result?.scorecard && result.scorecard.length > 0) return result;
+    if (result.ok && result.data.scorecard?.length > 0) return result.data;
+
+    if (!result.ok && !result.transient) {
+      console.log(`[sync] scorecard ${matchId} permanent failure (${result.reason}), not retrying`);
+      return null;
+    }
+
     if (i < attempts - 1) {
       console.log(`[sync] scorecard attempt ${i + 1}/${attempts} failed for ${matchId}, retrying in ${delays[i]}ms`);
       await new Promise((r) => setTimeout(r, delays[i]));

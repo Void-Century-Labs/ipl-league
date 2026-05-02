@@ -5,7 +5,8 @@ interface CricAPIResponse<T> {
   apikey: string;
   data: T;
   status: string;
-  info: {
+  reason?: string;
+  info?: {
     hitsToday: number;
     hitsLimit: number;
     credits: number;
@@ -72,10 +73,14 @@ export interface CricAPIScorecard {
   }>;
 }
 
+export type CricAPIResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; transient: boolean; reason: string };
+
 async function fetchAPI<T>(
   endpoint: string,
   params: Record<string, string> = {}
-): Promise<T | null> {
+): Promise<CricAPIResult<T>> {
   const url = new URL(`${BASE_URL}/${endpoint}`);
   url.searchParams.set("apikey", API_KEY);
   for (const [key, value] of Object.entries(params)) {
@@ -85,24 +90,32 @@ async function fetchAPI<T>(
   try {
     const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) {
-      console.error(`CricAPI ${endpoint} failed: ${res.status}`);
-      return null;
+      const reason = `HTTP ${res.status}`;
+      console.error(`CricAPI ${endpoint} failed: ${reason}`);
+      return { ok: false, transient: res.status >= 500, reason };
     }
     const json: CricAPIResponse<T> = await res.json();
 
-    console.log(
-      `CricAPI ${endpoint}: ${json.info.hitsToday}/${json.info.hitsLimit} hits used today`
-    );
-
     if (json.status !== "success") {
-      console.error(`CricAPI ${endpoint} returned status: ${json.status}`);
-      return null;
+      const reason = json.reason ?? json.status;
+      console.error(
+        `CricAPI ${endpoint} returned status: ${json.status}${json.reason ? ` — ${json.reason}` : ""}`
+      );
+      // CricAPI status:"failure" is never recoverable within seconds —
+      // "not found" is permanent, "Blocked for 15 minutes" outlasts our backoff.
+      return { ok: false, transient: false, reason };
     }
 
-    return json.data;
+    if (json.info) {
+      console.log(
+        `CricAPI ${endpoint}: ${json.info.hitsToday}/${json.info.hitsLimit} hits used today`
+      );
+    }
+
+    return { ok: true, data: json.data };
   } catch (err) {
     console.error(`CricAPI ${endpoint} error:`, err);
-    return null;
+    return { ok: false, transient: true, reason: String(err) };
   }
 }
 
@@ -124,33 +137,34 @@ export interface CricAPISeriesInfo {
 }
 
 export async function listSeries(search: string): Promise<CricAPISeries[]> {
-  const data = await fetchAPI<CricAPISeries[]>("series", { search });
-  return data ?? [];
+  const result = await fetchAPI<CricAPISeries[]>("series", { search });
+  return result.ok ? result.data : [];
 }
 
 export async function getSeriesInfo(
   seriesId: string
 ): Promise<CricAPISeriesInfo | null> {
-  return fetchAPI<CricAPISeriesInfo>("series_info", { id: seriesId });
+  const result = await fetchAPI<CricAPISeriesInfo>("series_info", { id: seriesId });
+  return result.ok ? result.data : null;
 }
 
 export async function getCurrentMatches(): Promise<CricAPIMatch[]> {
-  const data = await fetchAPI<CricAPIMatch[]>("currentMatches");
-  return data ?? [];
+  const result = await fetchAPI<CricAPIMatch[]>("currentMatches");
+  return result.ok ? result.data : [];
 }
 
 export async function getMatchScorecard(
   matchId: string
-): Promise<CricAPIScorecard | null> {
+): Promise<CricAPIResult<CricAPIScorecard>> {
   return fetchAPI<CricAPIScorecard>("match_scorecard", { id: matchId });
 }
 
 export async function searchPlayer(
   name: string
 ): Promise<{ id: string; name: string; country: string }[]> {
-  const data = await fetchAPI<{ id: string; name: string; country: string }[]>(
+  const result = await fetchAPI<{ id: string; name: string; country: string }[]>(
     "players",
     { search: name }
   );
-  return data ?? [];
+  return result.ok ? result.data : [];
 }
