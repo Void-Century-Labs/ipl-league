@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
-import { getSeriesInfo, getMatchScorecard } from "@/lib/cricapi";
-import { calculatePoints } from "@/lib/points";
-import type { ScorecardBatsman, ScorecardBowler } from "@/lib/cricapi";
+import { getSeriesMatches, getMatchScorecard } from "@/lib/cricbuzz";
+import type { CricbuzzMatch } from "@/lib/cricbuzz";
+import { buildScoreRows, type LeaguePlayer } from "@/lib/match-stats";
 
 export async function GET(request: NextRequest) {
-  // Verify cron secret in production
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
 
@@ -16,45 +15,42 @@ export async function GET(request: NextRequest) {
   return syncMatches();
 }
 
+const norm = (s?: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 async function syncMatches() {
   const summary: string[] = [];
 
   try {
-    // 1. Get all matches in the IPL series
-    const seriesId = process.env.IPL_SERIES_ID;
+    const seriesId = process.env.CRICBUZZ_SERIES_ID;
     if (!seriesId) {
-      return NextResponse.json({ status: "error", message: "IPL_SERIES_ID env var not set" });
+      return NextResponse.json({
+        status: "error",
+        message: "CRICBUZZ_SERIES_ID env var not set",
+      });
     }
+    summary.push(`Using Cricbuzz seriesId: ${seriesId}`);
 
-    summary.push(`Using series ID: ${seriesId}`);
-
-    const seriesInfo = await getSeriesInfo(seriesId);
-
-    if (!seriesInfo) {
-      return NextResponse.json({ status: "error", message: "series_info API call failed — null response", summary });
+    const seriesResult = await getSeriesMatches(seriesId);
+    if (!seriesResult.ok) {
+      return NextResponse.json({
+        status: "error",
+        message: `Series fetch failed: ${seriesResult.reason}`,
+        summary,
+      });
     }
+    const allMatches = seriesResult.data;
+    const ended = allMatches.filter(
+      (m) => (m.state ?? "").toLowerCase() === "complete"
+    );
+    summary.push(`Found ${allMatches.length} matches, ${ended.length} ended`);
 
-    const iplMatches = seriesInfo.matchList ?? [];
-    summary.push(`Found ${iplMatches.length} matches in series`);
-
-    // 2. Get already-synced matches. We dedup by BOTH cricapi_match_id and
-    // name, because CricAPI sometimes re-issues a new id for the same physical
-    // match (observed: same game returned with a different id and a slightly
-    // different timestamp on a later sync, which created duplicates).
     const { data: existingMatches } = await supabaseAdmin
       .from("matches")
-      .select("cricapi_match_id, name");
-    const syncedIds = new Set(
-      (existingMatches ?? []).map((m) => m.cricapi_match_id)
-    );
-    const syncedNames = new Set(
-      (existingMatches ?? []).map((m) => m.name).filter(Boolean)
-    );
+      .select("id, name, match_date, teams");
 
-    // 3. Get our league players for matching
     const { data: leaguePlayers } = await supabaseAdmin
       .from("players")
-      .select("id, name, cricapi_player_id, is_captain, is_vice_captain");
+      .select("id, name, is_captain, is_vice_captain");
 
     if (!leaguePlayers) {
       return NextResponse.json({
@@ -63,95 +59,93 @@ async function syncMatches() {
       });
     }
 
+    // Dedup by (date_day, both teams substring-match) — Cricbuzz match IDs and
+    // names differ from the CricAPI ones in the existing rows, so we can't
+    // dedup on either; date+teams is the stable physical-match key.
+    function isAlreadySynced(cb: CricbuzzMatch): boolean {
+      const cbDay = new Date(Number(cb.startDate ?? 0))
+        .toISOString()
+        .slice(0, 10);
+      const cbTeams = [cb.team1?.teamName, cb.team2?.teamName]
+        .map(norm)
+        .filter(Boolean);
+      return (existingMatches ?? []).some(
+        (ex: { match_date?: string | null; teams?: string[] | null }) => {
+          const exDay = (ex.match_date ?? "").slice(0, 10);
+          if (exDay !== cbDay) return false;
+          const exTeams = (ex.teams ?? []).map(norm);
+          return cbTeams.every((cbT) =>
+            exTeams.some((exT) => exT.includes(cbT) || cbT.includes(exT))
+          );
+        }
+      );
+    }
+
     let matchesSynced = 0;
     let playerScoresAdded = 0;
 
-    for (const match of iplMatches) {
-      // Skip already synced and non-completed matches.
-      // Dedup on cricapi_match_id AND name — see note above.
-      if (syncedIds.has(match.id)) continue;
-      if (match.name && syncedNames.has(match.name)) {
-        summary.push(`Skipping duplicate (by name): ${match.name}`);
+    for (const match of ended) {
+      if (isAlreadySynced(match)) continue;
+
+      const label = `${match.team1?.teamSName} vs ${match.team2?.teamSName}`;
+
+      const scardResult = await getMatchScorecard(match.matchId);
+      if (!scardResult.ok) {
+        const tag = scardResult.transient ? "transient" : "permanent";
+        summary.push(
+          `Scorecard ${tag} failure for ${label}: ${scardResult.reason}`
+        );
         continue;
       }
-      if (!match.matchEnded) continue;
-
-      // Fetch scorecard FIRST with retry. We don't insert the match row until
-      // we successfully have a scorecard — otherwise a partial failure leaves
-      // an orphaned match row that the dedup would skip forever.
-      const scorecard = await fetchScorecardWithRetry(match.id);
-      if (!scorecard?.scorecard) {
-        summary.push(`No scorecard after retries for: ${match.name} — will retry next run`);
+      const scard = scardResult.data;
+      if (!scard.scorecard?.length) {
+        summary.push(`No innings for ${label} — skipping`);
         continue;
       }
 
-      // Build all score rows in memory before touching the DB
-      const scoreRows = [];
-      for (const player of leaguePlayers) {
-        if (!player.cricapi_player_id) continue;
-
-        const stats = extractPlayerStats(
-          scorecard.scorecard,
-          player.cricapi_player_id
-        );
-        if (!stats) {
-          console.log(`[sync] SKIP ${player.name} (${player.cricapi_player_id}) — not found in scorecard`);
-          continue;
-        }
-
-        const points = calculatePoints(stats, {
-          isCaptain: player.is_captain,
-          isViceCaptain: player.is_vice_captain,
-        });
-
-        console.log(
-          `[sync] ${player.name} | runs=${stats.runs} wkts=${stats.wickets} 6s=${stats.sixes} catches=${stats.catches} | raw=${points.rawTotal} final=${points.finalTotal}${player.is_captain ? " (C)" : player.is_vice_captain ? " (VC)" : ""}`
-        );
-
-        scoreRows.push({
-          player_id: player.id,
-          runs: stats.runs,
-          wickets: stats.wickets,
-          catches: stats.catches,
-          sixes: stats.sixes,
-          is_century: stats.isCentury,
-          is_five_wicket: stats.isFiveWicket,
-          is_hat_trick: stats.isHatTrick,
-          is_six_sixes: stats.isSixSixes,
-          raw_points: points.rawTotal,
-          final_points: points.finalTotal,
-        });
+      const { rows: scoreRows, unmatched } = buildScoreRows(
+        scard,
+        leaguePlayers as LeaguePlayer[]
+      );
+      if (unmatched.length > 0) {
+        console.log(`[sync] unmatched in ${label}:`, unmatched.join(", "));
       }
 
-      // Now (and only now) insert the match row
+      const matchDateIso = new Date(
+        Number(match.startDate ?? 0)
+      ).toISOString();
+      const matchName = `${match.team1?.teamName} vs ${match.team2?.teamName}, ${match.matchDesc}, Indian Premier League 2026`;
+      const venue = [match.venueInfo?.ground, match.venueInfo?.city]
+        .filter(Boolean)
+        .join(", ");
+
       const { data: insertedMatch, error: matchError } = await supabaseAdmin
         .from("matches")
         .insert({
-          cricapi_match_id: match.id,
-          name: match.name,
-          match_date: match.dateTimeGMT,
+          cricapi_match_id: null,
+          name: matchName,
+          match_date: matchDateIso,
           status: "completed",
-          teams: match.teams,
-          venue: match.venue,
+          teams: [match.team1?.teamName, match.team2?.teamName].filter(Boolean),
+          venue,
           result: match.status,
         })
         .select("id")
         .single();
 
       if (matchError || !insertedMatch) {
-        summary.push(`Failed to insert match: ${match.name} (${matchError?.message ?? "unknown"})`);
+        summary.push(
+          `Failed to insert match: ${matchName} (${matchError?.message ?? "unknown"})`
+        );
         continue;
       }
       matchesSynced++;
 
       if (scoreRows.length === 0) {
-        // No league players were in this match — that's a legitimate state
-        // (e.g. all-overseas XI playing). Match row stands; nothing to score.
-        summary.push(`No league players in: ${match.name}`);
+        summary.push(`No league players in: ${matchName}`);
         continue;
       }
 
-      // Bulk upsert all score rows for this match
       const { error: scoreError } = await supabaseAdmin
         .from("player_match_scores")
         .upsert(
@@ -160,15 +154,24 @@ async function syncMatches() {
         );
 
       if (scoreError) {
-        // Scoring failed after the match was inserted. Roll back the match row
-        // so the next sync run will re-attempt this match cleanly.
-        console.error(`[sync] Bulk score upsert failed for ${match.name}:`, scoreError.message);
-        await supabaseAdmin.from("matches").delete().eq("id", insertedMatch.id);
+        // Rollback: delete the match row so the next run retries cleanly.
+        console.error(
+          `[sync] Score upsert failed for ${matchName}:`,
+          scoreError.message
+        );
+        await supabaseAdmin
+          .from("matches")
+          .delete()
+          .eq("id", insertedMatch.id);
         matchesSynced--;
-        summary.push(`Score insert failed, rolled back match: ${match.name}`);
+        summary.push(`Score insert failed, rolled back: ${matchName}`);
         continue;
       }
       playerScoresAdded += scoreRows.length;
+
+      console.log(
+        `[sync] ${matchName}: inserted ${scoreRows.length} score rows`
+      );
     }
 
     summary.push(
@@ -186,73 +189,4 @@ async function syncMatches() {
       { status: 500 }
     );
   }
-}
-
-// Retry the scorecard fetch a few times before giving up. CricAPI is
-// occasionally flaky right after a match ends — a transient null shouldn't
-// cause us to skip the match permanently. Skip retries on permanent
-// failures (e.g. "not found", rate limit) to avoid burning the daily quota.
-async function fetchScorecardWithRetry(matchId: string, attempts = 3) {
-  const delays = [1000, 2000, 4000]; // 1s, 2s, 4s
-  for (let i = 0; i < attempts; i++) {
-    const result = await getMatchScorecard(matchId);
-    if (result.ok && result.data.scorecard?.length > 0) return result.data;
-
-    if (!result.ok && !result.transient) {
-      console.log(`[sync] scorecard ${matchId} permanent failure (${result.reason}), not retrying`);
-      return null;
-    }
-
-    if (i < attempts - 1) {
-      console.log(`[sync] scorecard attempt ${i + 1}/${attempts} failed for ${matchId}, retrying in ${delays[i]}ms`);
-      await new Promise((r) => setTimeout(r, delays[i]));
-    }
-  }
-  return null;
-}
-
-function extractPlayerStats(
-  scorecardInnings: Array<{
-    batting: ScorecardBatsman[];
-    bowling: ScorecardBowler[];
-  }>,
-  cricapiPlayerId: string
-) {
-  let totalRuns = 0;
-  let totalWickets = 0;
-  let totalSixes = 0;
-  let totalCatches = 0;
-  let found = false;
-
-  for (const innings of scorecardInnings) {
-    // Check batting
-    for (const bat of innings.batting) {
-      if (bat.batsman.id === cricapiPlayerId) {
-        totalRuns += bat.r;
-        totalSixes += bat["6s"];
-        found = true;
-      }
-    }
-
-    // Check bowling
-    for (const bowl of innings.bowling) {
-      if (bowl.bowler.id === cricapiPlayerId) {
-        totalWickets += bowl.w;
-        found = true;
-      }
-    }
-  }
-
-  if (!found) return null;
-
-  return {
-    runs: totalRuns,
-    wickets: totalWickets,
-    catches: totalCatches,
-    sixes: totalSixes,
-    isCentury: totalRuns >= 100,
-    isFiveWicket: totalWickets >= 5,
-    isHatTrick: false, // CricAPI doesn't directly provide hat-trick info; needs manual check
-    isSixSixes: false, // requires ball-by-ball data — scorecard only has match totals
-  };
 }
